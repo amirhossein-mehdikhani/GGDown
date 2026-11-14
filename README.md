@@ -14,7 +14,7 @@ A modern, high-performance, cross-platform (Windows, macOS, Linux) Download Mana
 2. **Resumable Upload Engine (Google Drive Resumable Protocol):**
    * Implements Google Drive's official `uploadType=resumable` specification.
    * Saves active session URIs. If your connection drops or the app is closed, it queries Google with `Content-Range: bytes */TOTAL` (`308 Resume Incomplete`) to find the exact byte offset received, resuming instantly without re-uploading previous data!
-   * 8 MB Rust-powered network chunking for maximum stability and minimal memory usage.
+   * 2 MB Rust-powered network chunking with retry backoff for maximum stability and minimal memory usage.
 
 3. **Resumable Download Engine:**
    * Utilizes HTTP `Range: bytes=OFFSET-` headers.
@@ -42,8 +42,27 @@ sudo apt install -y pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev lib
 npm run tauri dev
 ```
 
-### Build Production Binary (deb / AppImage / exe):
+### Build Production Binary Locally (deb / AppImage / exe):
 ```bash
 npm run tauri build
 ```
 Production packages will be generated under `src-tauri/target/release/bundle/`.
+
+---
+
+## 📦 Automated GitHub Releases (CI/CD)
+
+Whenever you are ready to publish a new release across **Windows**, **macOS**, and **Linux**, simply create and push a version tag:
+
+```bash
+git tag v0.1.0
+git push origin v0.1.0
+```
+
+GitHub Actions will automatically:
+1. Spin up Ubuntu, Windows, and macOS runners in parallel.
+2. Compile and package:
+   - **Windows:** `.exe` installer (NSIS) and `.msi` package
+   - **Linux:** `.deb` package and portable `.AppImage`
+   - **macOS:** `.dmg` installer (Apple Silicon & Intel)
+3. Create a GitHub Release in your repository and upload all downloadable installers!
