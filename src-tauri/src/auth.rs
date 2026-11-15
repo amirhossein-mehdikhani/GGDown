@@ -168,10 +168,50 @@ impl AuthManager {
             accounts_store.active_account_id = Some(accounts_store.accounts[0].id.clone());
         }
 
+        Self::sync_tokens_file_dir(&config_dir, &accounts_store);
+
         Self {
             config_dir,
             credentials: Arc::new(Mutex::new(credentials)),
             accounts_store: Arc::new(Mutex::new(accounts_store)),
+        }
+    }
+
+    fn sync_tokens_file(&self, store: &AccountsStore) {
+        Self::sync_tokens_file_dir(&self.config_dir, store);
+    }
+
+    fn sync_tokens_file_dir(config_dir: &std::path::Path, store: &AccountsStore) {
+        let tokens_file = config_dir.join("tokens.json");
+        let active = if let Some(ref id) = store.active_account_id {
+            store.accounts.iter().find(|a| a.id == *id)
+        } else {
+            store.accounts.first()
+        };
+
+        if let Some(acc) = active {
+            #[derive(Serialize)]
+            struct LegacyToken {
+                access_token: String,
+                refresh_token: Option<String>,
+                expires_at: u64,
+                user_email: Option<String>,
+                user_name: Option<String>,
+                user_picture: Option<String>,
+            }
+
+            let legacy = LegacyToken {
+                access_token: acc.access_token.clone(),
+                refresh_token: acc.refresh_token.clone(),
+                expires_at: acc.expires_at,
+                user_email: Some(acc.email.clone()),
+                user_name: acc.name.clone(),
+                user_picture: acc.picture.clone(),
+            };
+
+            let _ = fs::write(tokens_file, serde_json::to_string_pretty(&legacy).unwrap_or_default());
+        } else if tokens_file.exists() {
+            let _ = fs::remove_file(tokens_file);
         }
     }
 
@@ -202,6 +242,7 @@ impl AuthManager {
             store.active_account_id = Some(account_id.to_string());
             let file = self.config_dir.join("accounts.json");
             let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
+            self.sync_tokens_file(&store);
             Ok(())
         } else {
             Err(format!("Account '{}' not found", account_id))
@@ -216,6 +257,7 @@ impl AuthManager {
         }
         let file = self.config_dir.join("accounts.json");
         let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
+        self.sync_tokens_file(&store);
         Ok(())
     }
 
@@ -434,6 +476,7 @@ impl AuthManager {
 
                                 let file = config_dir_clone.join("accounts.json");
                                 let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
+                                Self::sync_tokens_file_dir(&config_dir_clone, &store);
                                 success = true;
                             }
                         }
@@ -452,5 +495,20 @@ impl AuthManager {
         });
 
         Ok(auth_url)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[tokio::test]
+    async fn test_auth_manager_load() {
+        let manager = AuthManager::new();
+        let store = manager.get_accounts().await;
+        println!("Loaded accounts: {}", store.accounts.len());
+        for acc in &store.accounts {
+            println!("Account: {}", acc.email);
+        }
     }
 }
