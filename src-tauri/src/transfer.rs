@@ -47,6 +47,8 @@ pub struct TransferTask {
     pub parent_id: Option<String>,
     pub speed_bytes_per_sec: u64,
     pub error_message: Option<String>,
+    #[serde(default)]
+    pub account_id: Option<String>,
 }
 
 #[derive(Clone, Serialize)]
@@ -113,6 +115,7 @@ impl TransferManager {
         file_name: String,
         file_size: u64,
         destination_dir: String,
+        account_id: Option<String>,
     ) -> Result<TransferTask, String> {
         let local_path = PathBuf::from(&destination_dir).join(&file_name).to_string_lossy().to_string();
         let task = TransferTask {
@@ -128,6 +131,7 @@ impl TransferManager {
             parent_id: None,
             speed_bytes_per_sec: 0,
             error_message: None,
+            account_id,
         };
 
         self.tasks.lock().await.push(task.clone());
@@ -139,6 +143,7 @@ impl TransferManager {
         &self,
         file_path: String,
         parent_id: Option<String>,
+        account_id: Option<String>,
     ) -> Result<TransferTask, String> {
         let path = PathBuf::from(&file_path);
         if !path.exists() {
@@ -162,6 +167,7 @@ impl TransferManager {
             parent_id,
             speed_bytes_per_sec: 0,
             error_message: None,
+            account_id,
         };
 
         self.tasks.lock().await.push(task.clone());

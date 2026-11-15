@@ -28,7 +28,10 @@ import {
   WifiOff,
   ExternalLink,
   Copy,
-  Check
+  Check,
+  ChevronDown,
+  UserPlus,
+  Users
 } from "lucide-react";
 
 interface DriveFile {
@@ -52,19 +55,23 @@ interface TransferTask {
   status: "pending" | "active" | "paused" | "completed" | "error";
   speed_bytes_per_sec: number;
   error_message?: string;
+  account_id?: string;
 }
 
-interface UserData {
-  user_email?: string;
-  user_name?: string;
-  user_picture?: string;
+interface GoogleAccount {
+  id: string;
+  email: string;
+  name?: string;
+  picture?: string;
 }
 
 interface AuthStatus {
   is_logged_in: boolean;
   has_credentials: boolean;
   client_id?: string;
-  user?: UserData;
+  active_account?: GoogleAccount;
+  accounts: GoogleAccount[];
+  user?: GoogleAccount;
 }
 
 function formatBytes(bytes: number, decimals = 2) {
@@ -89,6 +96,7 @@ export default function App() {
   const [authLoading, setAuthLoading] = useState(false);
   const [pendingAuthUrl, setPendingAuthUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
+  const [showAccountDropdown, setShowAccountDropdown] = useState(false);
 
   // Drive state
   const [files, setFiles] = useState<DriveFile[]>([]);
@@ -237,15 +245,21 @@ export default function App() {
         console.warn("Direct browser launch returned:", err);
       }
 
-      // Check periodically if token was acquired
+      // Check periodically if token was acquired or new account added
+      const prevAccountCount = authStatus?.accounts?.length || 0;
+      const prevActiveId = authStatus?.active_account?.id;
       const interval = setInterval(async () => {
         const status: AuthStatus = await invoke("auth_get_status");
-        if (status.is_logged_in) {
+        if (
+          status.is_logged_in &&
+          (status.accounts?.length > prevAccountCount || status.active_account?.id !== prevActiveId || !authStatus?.is_logged_in)
+        ) {
           setAuthStatus(status);
           setShowSettings(false);
           setAuthLoading(false);
           setPendingAuthUrl(null);
           clearInterval(interval);
+          loadDriveFiles(null);
         }
       }, 1500);
 
@@ -257,6 +271,45 @@ export default function App() {
       alert(`Error starting login: ${e}`);
       setAuthLoading(false);
     }
+  };
+
+  const handleSwitchAccount = async (accountId: string) => {
+    try {
+      setShowAccountDropdown(false);
+      await invoke("auth_switch_account", { accountId });
+      const status: AuthStatus = await invoke("auth_get_status");
+      setAuthStatus(status);
+      setCurrentFolderId(null);
+      setBreadcrumbs([{ id: null, name: "My Drive" }]);
+      await loadDriveFiles(null);
+    } catch (e) {
+      alert(`Error switching account: ${e}`);
+    }
+  };
+
+  const handleRemoveAccount = async (e: React.MouseEvent, accountId: string, email: string) => {
+    e.stopPropagation();
+    if (!confirm(`Are you sure you want to disconnect ${email}?`)) return;
+    try {
+      await invoke("auth_remove_account", { accountId });
+      const updatedStatus: AuthStatus = await invoke("auth_get_status");
+      setAuthStatus(updatedStatus);
+      if (updatedStatus.is_logged_in) {
+        setCurrentFolderId(null);
+        setBreadcrumbs([{ id: null, name: "My Drive" }]);
+        await loadDriveFiles(null);
+      } else {
+        setFiles([]);
+        setDriveError(null);
+      }
+    } catch (err) {
+      alert(`Error disconnecting account: ${err}`);
+    }
+  };
+
+  const handleAddAccount = () => {
+    setShowAccountDropdown(false);
+    handleStartLogin();
   };
 
   const handleManualOpenBrowser = async () => {
@@ -279,6 +332,7 @@ export default function App() {
 
   const handleLogout = async () => {
     try {
+      setShowAccountDropdown(false);
       await invoke("auth_logout");
       await loadAuthStatus();
       setFiles([]);
@@ -349,6 +403,7 @@ export default function App() {
         fileName: file.name,
         fileSize: size,
         destinationDir: null,
+        accountId: authStatus?.active_account?.id || null,
       });
 
       setTransfers((prev) => [...prev, task]);
@@ -369,6 +424,7 @@ export default function App() {
           const task: TransferTask = await invoke("transfer_add_upload", {
             filePath,
             parentId: currentFolderId || undefined,
+            accountId: authStatus?.active_account?.id || null,
           });
 
           setTransfers((prev) => [...prev, { ...task, status: "active" }]);
@@ -508,30 +564,140 @@ export default function App() {
             )}
           </div>
 
-          {/* User Profile or Connect Button */}
+          {/* User Profile / Account Switcher or Connect Button */}
           {authStatus?.is_logged_in ? (
-            <div className="flex items-center gap-2 bg-slate-900/80 px-3 py-1.5 rounded-xl border border-slate-800">
-              {authStatus.user?.user_picture ? (
-                <img
-                  src={authStatus.user.user_picture}
-                  alt="avatar"
-                  className="w-6 h-6 rounded-full border border-slate-700"
-                />
-              ) : (
-                <div className="w-6 h-6 rounded-full bg-blue-600 text-[11px] flex items-center justify-center font-bold">
-                  {authStatus.user?.user_name?.[0] || "U"}
-                </div>
-              )}
-              <span className="text-xs text-slate-200 font-medium max-w-[140px] truncate">
-                {authStatus.user?.user_email || "Connected"}
-              </span>
+            <div className="relative">
               <button
-                onClick={handleLogout}
-                title="Sign Out"
-                className="p-1 rounded text-slate-400 hover:text-rose-400 hover:bg-slate-800 transition"
+                onClick={() => setShowAccountDropdown(!showAccountDropdown)}
+                className={`flex items-center gap-2.5 px-3 py-1.5 rounded-xl border transition-all ${
+                  showAccountDropdown
+                    ? "bg-slate-800 border-blue-500/50 shadow-md shadow-blue-500/10"
+                    : "bg-slate-900/90 hover:bg-slate-800/80 border-slate-800"
+                }`}
               >
-                <LogOut className="w-3.5 h-3.5" />
+                {authStatus.active_account?.picture ? (
+                  <img
+                    src={authStatus.active_account.picture}
+                    alt="avatar"
+                    className="w-6 h-6 rounded-full border border-slate-700 object-cover"
+                  />
+                ) : (
+                  <div className="w-6 h-6 rounded-full bg-gradient-to-tr from-blue-600 to-indigo-600 text-[11px] flex items-center justify-center font-bold text-white shadow-sm">
+                    {authStatus.active_account?.name?.[0] || authStatus.active_account?.email?.[0]?.toUpperCase() || "G"}
+                  </div>
+                )}
+                <div className="flex flex-col text-left">
+                  <span className="text-xs text-slate-200 font-semibold max-w-[130px] truncate leading-tight">
+                    {authStatus.active_account?.email || "Connected"}
+                  </span>
+                  {authStatus.accounts && authStatus.accounts.length > 1 && (
+                    <span className="text-[10px] text-blue-400 font-medium">
+                      {authStatus.accounts.length} Accounts
+                    </span>
+                  )}
+                </div>
+                <ChevronDown
+                  className={`w-3.5 h-3.5 text-slate-400 transition-transform duration-200 ${
+                    showAccountDropdown ? "rotate-180 text-blue-400" : ""
+                  }`}
+                />
               </button>
+
+              {/* Accounts Dropdown Popover */}
+              {showAccountDropdown && (
+                <>
+                  <div
+                    className="fixed inset-0 z-30"
+                    onClick={() => setShowAccountDropdown(false)}
+                  />
+                  <div className="absolute right-0 mt-2 w-72 bg-[#111827] border border-slate-800 rounded-2xl shadow-2xl p-2 z-40 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150">
+                    <div className="px-3 py-2 border-b border-slate-800/80 flex items-center justify-between">
+                      <span className="text-xs font-bold text-slate-300 flex items-center gap-1.5">
+                        <Users className="w-3.5 h-3.5 text-blue-400" />
+                        Google Accounts
+                      </span>
+                      <span className="text-[10px] bg-slate-800 text-slate-400 px-1.5 py-0.5 rounded-md font-medium">
+                        {authStatus.accounts?.length || 1} connected
+                      </span>
+                    </div>
+
+                    {/* Account Items List */}
+                    <div className="py-1.5 max-h-60 overflow-y-auto space-y-1">
+                      {authStatus.accounts?.map((acc) => {
+                        const isActive = acc.id === authStatus.active_account?.id;
+                        return (
+                          <div
+                            key={acc.id}
+                            onClick={() => handleSwitchAccount(acc.id)}
+                            className={`flex items-center justify-between p-2 rounded-xl cursor-pointer transition group ${
+                              isActive
+                                ? "bg-blue-600/15 border border-blue-500/30 text-white"
+                                : "hover:bg-slate-800/70 text-slate-300"
+                            }`}
+                          >
+                            <div className="flex items-center gap-2.5 min-w-0">
+                              {acc.picture ? (
+                                <img
+                                  src={acc.picture}
+                                  alt="avatar"
+                                  className="w-7 h-7 rounded-full border border-slate-700 object-cover shrink-0"
+                                />
+                              ) : (
+                                <div className="w-7 h-7 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                                  {acc.name?.[0] || acc.email?.[0]?.toUpperCase() || "G"}
+                                </div>
+                              )}
+                              <div className="flex flex-col min-w-0">
+                                {acc.name && (
+                                  <span className="text-xs font-semibold truncate leading-tight">
+                                    {acc.name}
+                                  </span>
+                                )}
+                                <span className="text-[11px] text-slate-400 truncate">
+                                  {acc.email}
+                                </span>
+                              </div>
+                            </div>
+
+                            <div className="flex items-center gap-1 shrink-0 ml-2">
+                              {isActive ? (
+                                <span className="w-2 h-2 rounded-full bg-emerald-400 shadow-sm shadow-emerald-400/80" />
+                              ) : (
+                                <button
+                                  onClick={(e) => handleRemoveAccount(e, acc.id, acc.email)}
+                                  title="Disconnect this account"
+                                  className="opacity-0 group-hover:opacity-100 p-1 rounded-lg text-slate-500 hover:text-rose-400 hover:bg-slate-700/50 transition"
+                                >
+                                  <Trash2 className="w-3.5 h-3.5" />
+                                </button>
+                              )}
+                            </div>
+                          </div>
+                        );
+                      })}
+                    </div>
+
+                    {/* Actions */}
+                    <div className="pt-2 border-t border-slate-800/80 space-y-1">
+                      <button
+                        onClick={handleAddAccount}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-blue-400 hover:bg-blue-600/10 hover:text-blue-300 transition"
+                      >
+                        <UserPlus className="w-4 h-4" />
+                        Add another Google account
+                      </button>
+
+                      <button
+                        onClick={handleLogout}
+                        className="w-full flex items-center gap-2 px-3 py-2 rounded-xl text-xs font-medium text-rose-400/80 hover:bg-rose-500/10 hover:text-rose-300 transition"
+                      >
+                        <LogOut className="w-3.5 h-3.5" />
+                        Sign Out of all accounts
+                      </button>
+                    </div>
+                  </div>
+                </>
+              )}
             </div>
           ) : (
             <button
@@ -817,9 +983,16 @@ export default function App() {
                             </div>
                           )}
                           <div className="min-w-0">
-                            <h4 className="text-sm font-bold truncate text-slate-100">
-                              {task.file_name}
-                            </h4>
+                            <div className="flex items-center gap-2">
+                              <h4 className="text-sm font-bold truncate text-slate-100">
+                                {task.file_name}
+                              </h4>
+                              {task.account_id && (
+                                <span className="text-[10px] px-2 py-0.5 rounded-md bg-slate-800/80 text-blue-400 border border-slate-700/60 font-mono shrink-0">
+                                  {task.account_id}
+                                </span>
+                              )}
+                            </div>
                             <p className="text-xs text-slate-500 truncate font-mono">
                               {task.local_path}
                             </p>
@@ -973,6 +1146,79 @@ export default function App() {
               </button>
             </div>
 
+            {/* Connected Accounts Section */}
+            {authStatus?.accounts && authStatus.accounts.length > 0 && (
+              <div className="mb-6 p-4 rounded-2xl bg-[#0b0f19] border border-slate-800">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="text-xs font-bold text-slate-200 flex items-center gap-1.5">
+                    <Users className="w-3.5 h-3.5 text-blue-400" />
+                    Connected Accounts ({authStatus.accounts.length})
+                  </span>
+                </div>
+                <div className="space-y-2">
+                  {authStatus.accounts.map((acc) => {
+                    const isActive = acc.id === authStatus.active_account?.id;
+                    return (
+                      <div
+                        key={acc.id}
+                        className={`flex items-center justify-between p-2.5 rounded-xl border transition ${
+                          isActive
+                            ? "bg-blue-600/10 border-blue-500/30 text-white"
+                            : "bg-slate-900/60 border-slate-800/80 text-slate-300"
+                        }`}
+                      >
+                        <div className="flex items-center gap-2.5 min-w-0">
+                          {acc.picture ? (
+                            <img
+                              src={acc.picture}
+                              alt="avatar"
+                              className="w-7 h-7 rounded-full border border-slate-700 object-cover shrink-0"
+                            />
+                          ) : (
+                            <div className="w-7 h-7 rounded-full bg-blue-600 text-white text-xs flex items-center justify-center font-bold shrink-0">
+                              {acc.name?.[0] || acc.email?.[0]?.toUpperCase() || "G"}
+                            </div>
+                          )}
+                          <div className="flex flex-col min-w-0">
+                            {acc.name && (
+                              <span className="text-xs font-semibold truncate leading-tight">
+                                {acc.name}
+                              </span>
+                            )}
+                            <span className="text-[11px] text-slate-400 truncate font-mono">
+                              {acc.email}
+                            </span>
+                          </div>
+                        </div>
+
+                        <div className="flex items-center gap-2">
+                          {isActive ? (
+                            <span className="text-[10px] font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/25 px-2 py-0.5 rounded-full">
+                              Active
+                            </span>
+                          ) : (
+                            <button
+                              onClick={() => handleSwitchAccount(acc.id)}
+                              className="text-[11px] text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 px-2.5 py-1 rounded-lg transition"
+                            >
+                              Switch to this
+                            </button>
+                          )}
+                          <button
+                            onClick={(e) => handleRemoveAccount(e, acc.id, acc.email)}
+                            title="Disconnect account"
+                            className="p-1.5 rounded-lg text-slate-400 hover:text-rose-400 hover:bg-rose-500/10 transition"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </button>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            )}
+
             {/* Login Section */}
             <div className="pt-4 border-t border-slate-800/80 space-y-3">
               <button
@@ -980,8 +1226,12 @@ export default function App() {
                 disabled={authLoading}
                 className="w-full py-3 bg-gradient-to-r from-blue-600 to-indigo-600 hover:from-blue-500 hover:to-indigo-500 text-white font-semibold rounded-xl text-sm shadow-lg shadow-blue-600/30 transition-all flex items-center justify-center gap-2 disabled:opacity-60"
               >
-                <LogIn className="w-4 h-4" />
-                {authLoading ? "Waiting for browser authorization..." : "Sign In with Google (OAuth 2.0)"}
+                {authStatus?.is_logged_in ? <UserPlus className="w-4 h-4" /> : <LogIn className="w-4 h-4" />}
+                {authLoading
+                  ? "Waiting for browser authorization..."
+                  : authStatus?.is_logged_in
+                  ? "Add Another Google Account (OAuth 2.0)"
+                  : "Sign In with Google (OAuth 2.0)"}
               </button>
 
               {/* If waiting for browser approval, show direct link fallback */}

@@ -1,6 +1,6 @@
 [package]
 name = "ggdown"
-version = "0.1.0"
+version = "0.2.0"
 description = "Modern Google Drive Download Manager"
 authors = ["amir"]
 edition = "2021"

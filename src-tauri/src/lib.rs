@@ -2,7 +2,7 @@ mod auth;
 mod drive;
 mod transfer;
 
-use auth::{AuthCredentials, AuthManager, TokenData};
+use auth::{AuthCredentials, AuthManager, GoogleAccount};
 use drive::{DriveFile, DriveManager};
 use serde::Serialize;
 use std::sync::Arc;
@@ -20,24 +20,33 @@ pub struct AuthStatusResponse {
     pub is_logged_in: bool,
     pub has_credentials: bool,
     pub client_id: Option<String>,
-    pub user: Option<TokenData>,
+    pub active_account: Option<GoogleAccount>,
+    pub accounts: Vec<GoogleAccount>,
+    pub user: Option<GoogleAccount>, // for backwards compatibility
 }
 
 #[tauri::command]
 async fn auth_get_status(state: State<'_, AppState>) -> Result<AuthStatusResponse, String> {
     let creds_lock = state.auth.credentials.lock().await;
-    let token_lock = state.auth.token_data.lock().await;
+    let accounts_store = state.auth.get_accounts().await;
 
     let has_credentials = creds_lock.is_some();
     let client_id = creds_lock.as_ref().map(|c| c.client_id.clone());
-    let is_logged_in = token_lock.is_some();
-    let user = token_lock.clone();
+    let active_account = if let Some(ref active_id) = accounts_store.active_account_id {
+        accounts_store.accounts.iter().find(|a| a.id == *active_id).cloned()
+    } else {
+        accounts_store.accounts.first().cloned()
+    };
+    let is_logged_in = active_account.is_some();
+    let accounts = accounts_store.accounts;
 
     Ok(AuthStatusResponse {
         is_logged_in,
         has_credentials,
         client_id,
-        user,
+        user: active_account.clone(),
+        active_account,
+        accounts,
     })
 }
 
@@ -70,6 +79,22 @@ async fn auth_start_login(state: State<'_, AppState>) -> Result<String, String> 
         .auth
         .start_oauth_flow(creds.client_id, creds.client_secret)
         .await
+}
+
+#[tauri::command]
+async fn auth_switch_account(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.auth.set_active_account(&account_id).await
+}
+
+#[tauri::command]
+async fn auth_remove_account(
+    account_id: String,
+    state: State<'_, AppState>,
+) -> Result<(), String> {
+    state.auth.remove_account(&account_id).await
 }
 
 #[tauri::command]
@@ -124,6 +149,7 @@ async fn transfer_add_download(
     file_name: String,
     file_size: u64,
     destination_dir: Option<String>,
+    account_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TransferTask, String> {
     let dest = destination_dir.unwrap_or_else(|| {
@@ -133,9 +159,14 @@ async fn transfer_add_download(
             .to_string()
     });
 
+    let target_account_id = match account_id {
+        Some(id) => Some(id),
+        None => state.auth.get_active_account().await.map(|a| a.id),
+    };
+
     state
         .transfer
-        .add_download(file_id, file_name, file_size, dest)
+        .add_download(file_id, file_name, file_size, dest, target_account_id)
         .await
 }
 
@@ -143,9 +174,15 @@ async fn transfer_add_download(
 async fn transfer_add_upload(
     file_path: String,
     parent_id: Option<String>,
+    account_id: Option<String>,
     state: State<'_, AppState>,
 ) -> Result<TransferTask, String> {
-    state.transfer.add_upload(file_path, parent_id).await
+    let target_account_id = match account_id {
+        Some(id) => Some(id),
+        None => state.auth.get_active_account().await.map(|a| a.id),
+    };
+
+    state.transfer.add_upload(file_path, parent_id, target_account_id).await
 }
 
 #[tauri::command]
@@ -154,9 +191,9 @@ async fn transfer_start(
     state: State<'_, AppState>,
     app: AppHandle,
 ) -> Result<(), String> {
-    let token = state.auth.get_valid_token().await?;
     let tasks = state.transfer.get_tasks().await;
     let task = tasks.iter().find(|t| t.id == task_id).ok_or("Task not found")?;
+    let token = state.auth.get_valid_token_for(task.account_id.as_deref()).await?;
 
     match task.transfer_type {
         transfer::TransferType::Download => {
@@ -253,6 +290,8 @@ pub fn run() {
             auth_get_status,
             auth_save_credentials,
             auth_start_login,
+            auth_switch_account,
+            auth_remove_account,
             auth_logout,
             drive_list,
             drive_create_folder,

@@ -15,13 +15,26 @@ pub struct AuthCredentials {
 }
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
-pub struct TokenData {
+pub struct GoogleAccount {
+    pub id: String, // email
+    pub email: String,
+    pub name: Option<String>,
+    pub picture: Option<String>,
     pub access_token: String,
     pub refresh_token: Option<String>,
     pub expires_at: u64, // Unix timestamp in seconds
+    #[serde(default)]
     pub user_email: Option<String>,
+    #[serde(default)]
     pub user_name: Option<String>,
+    #[serde(default)]
     pub user_picture: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone, Default)]
+pub struct AccountsStore {
+    pub active_account_id: Option<String>,
+    pub accounts: Vec<GoogleAccount>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]
@@ -80,7 +93,7 @@ pub fn open_in_browser(url: &str) {
 pub struct AuthManager {
     config_dir: PathBuf,
     pub credentials: Arc<Mutex<Option<AuthCredentials>>>,
-    pub token_data: Arc<Mutex<Option<TokenData>>>,
+    pub accounts_store: Arc<Mutex<AccountsStore>>,
 }
 
 impl AuthManager {
@@ -90,6 +103,7 @@ impl AuthManager {
         let _ = fs::create_dir_all(&config_dir);
 
         let creds_file = config_dir.join("credentials.json");
+        let accounts_file = config_dir.join("accounts.json");
         let tokens_file = config_dir.join("tokens.json");
 
         let credentials = if creds_file.exists() {
@@ -100,18 +114,64 @@ impl AuthManager {
             None
         };
 
-        let token_data = if tokens_file.exists() {
-            fs::read_to_string(&tokens_file)
+        let mut accounts_store: AccountsStore = if accounts_file.exists() {
+            fs::read_to_string(&accounts_file)
                 .ok()
                 .and_then(|s| serde_json::from_str(&s).ok())
+                .unwrap_or_default()
+        } else if tokens_file.exists() {
+            // Migrate single legacy token
+            #[derive(Deserialize)]
+            struct LegacyTokenData {
+                access_token: String,
+                refresh_token: Option<String>,
+                expires_at: u64,
+                user_email: Option<String>,
+                user_name: Option<String>,
+                user_picture: Option<String>,
+            }
+
+            if let Ok(content) = fs::read_to_string(&tokens_file) {
+                if let Ok(legacy) = serde_json::from_str::<LegacyTokenData>(&content) {
+                    let email = legacy
+                        .user_email
+                        .clone()
+                        .unwrap_or_else(|| "account@gmail.com".to_string());
+                    let acc = GoogleAccount {
+                        id: email.clone(),
+                        email: email.clone(),
+                        name: legacy.user_name.clone(),
+                        picture: legacy.user_picture.clone(),
+                        access_token: legacy.access_token,
+                        refresh_token: legacy.refresh_token,
+                        expires_at: legacy.expires_at,
+                        user_email: legacy.user_email,
+                        user_name: legacy.user_name,
+                        user_picture: legacy.user_picture,
+                    };
+                    AccountsStore {
+                        active_account_id: Some(email),
+                        accounts: vec![acc],
+                    }
+                } else {
+                    AccountsStore::default()
+                }
+            } else {
+                AccountsStore::default()
+            }
         } else {
-            None
+            AccountsStore::default()
         };
+
+        // Ensure active_account_id is valid if accounts exist
+        if accounts_store.active_account_id.is_none() && !accounts_store.accounts.is_empty() {
+            accounts_store.active_account_id = Some(accounts_store.accounts[0].id.clone());
+        }
 
         Self {
             config_dir,
             credentials: Arc::new(Mutex::new(credentials)),
-            token_data: Arc::new(Mutex::new(token_data)),
+            accounts_store: Arc::new(Mutex::new(accounts_store)),
         }
     }
 
@@ -123,35 +183,84 @@ impl AuthManager {
         Ok(())
     }
 
-    pub async fn save_token(&self, token: TokenData) -> Result<(), String> {
-        let file = self.config_dir.join("tokens.json");
-        let json = serde_json::to_string_pretty(&token).map_err(|e| e.to_string())?;
-        fs::write(file, json).map_err(|e| e.to_string())?;
-        *self.token_data.lock().await = Some(token);
+    pub async fn get_accounts(&self) -> AccountsStore {
+        self.accounts_store.lock().await.clone()
+    }
+
+    pub async fn get_active_account(&self) -> Option<GoogleAccount> {
+        let store = self.accounts_store.lock().await;
+        if let Some(ref active_id) = store.active_account_id {
+            store.accounts.iter().find(|a| a.id == *active_id).cloned()
+        } else {
+            store.accounts.first().cloned()
+        }
+    }
+
+    pub async fn set_active_account(&self, account_id: &str) -> Result<(), String> {
+        let mut store = self.accounts_store.lock().await;
+        if store.accounts.iter().any(|a| a.id == account_id) {
+            store.active_account_id = Some(account_id.to_string());
+            let file = self.config_dir.join("accounts.json");
+            let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
+            Ok(())
+        } else {
+            Err(format!("Account '{}' not found", account_id))
+        }
+    }
+
+    pub async fn remove_account(&self, account_id: &str) -> Result<(), String> {
+        let mut store = self.accounts_store.lock().await;
+        store.accounts.retain(|a| a.id != account_id);
+        if store.active_account_id.as_deref() == Some(account_id) {
+            store.active_account_id = store.accounts.first().map(|a| a.id.clone());
+        }
+        let file = self.config_dir.join("accounts.json");
+        let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
         Ok(())
     }
 
     pub async fn clear_session(&self) -> Result<(), String> {
+        let mut store = self.accounts_store.lock().await;
+        store.accounts.clear();
+        store.active_account_id = None;
+        let file = self.config_dir.join("accounts.json");
+        let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
         let tokens_file = self.config_dir.join("tokens.json");
         if tokens_file.exists() {
             let _ = fs::remove_file(tokens_file);
         }
-        *self.token_data.lock().await = None;
         Ok(())
     }
 
     pub async fn get_valid_token(&self) -> Result<String, String> {
+        self.get_valid_token_for(None).await
+    }
+
+    pub async fn get_valid_token_for(&self, account_id: Option<&str>) -> Result<String, String> {
         let now = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
 
-        let mut token_lock = self.token_data.lock().await;
-        let token = token_lock.as_mut().ok_or_else(|| "Not logged in".to_string())?;
+        let mut store = self.accounts_store.lock().await;
+
+        let target_id = match account_id {
+            Some(id) => id.to_string(),
+            None => store
+                .active_account_id
+                .clone()
+                .ok_or_else(|| "No active Google account. Please log in.".to_string())?,
+        };
+
+        let account = store
+            .accounts
+            .iter_mut()
+            .find(|a| a.id == target_id)
+            .ok_or_else(|| format!("Account '{}' not found", target_id))?;
 
         // If token expires in less than 60 seconds and refresh token is available, refresh it
-        if token.expires_at <= now + 60 {
-            if let Some(ref refresh) = token.refresh_token {
+        if account.expires_at <= now + 60 {
+            if let Some(ref refresh) = account.refresh_token {
                 let creds_lock = self.credentials.lock().await;
                 let creds = creds_lock.as_ref().ok_or_else(|| "Credentials missing".to_string())?;
 
@@ -179,17 +288,17 @@ impl AuthManager {
                     .await
                     .map_err(|e| format!("Invalid token response: {}", e))?;
 
-                token.access_token = new_token.access_token.clone();
-                token.expires_at = now + new_token.expires_in;
+                account.access_token = new_token.access_token.clone();
+                account.expires_at = now + new_token.expires_in;
 
-                let file = self.config_dir.join("tokens.json");
-                let _ = fs::write(&file, serde_json::to_string_pretty(&token).unwrap_or_default());
+                let file = self.config_dir.join("accounts.json");
+                let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
 
                 return Ok(new_token.access_token);
             }
         }
 
-        Ok(token.access_token.clone())
+        Ok(account.access_token.clone())
     }
 
     pub async fn start_oauth_flow(
@@ -213,13 +322,14 @@ impl AuthManager {
             .port();
 
         let redirect_uri = format!("http://127.0.0.1:{}/callback", port);
+        // prompt=select_account consent ensures user can pick which account to add
         let auth_url = format!(
-            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive%20https://www.googleapis.com/auth/userinfo.email%20https://www.googleapis.com/auth/userinfo.profile&access_type=offline&prompt=consent&include_granted_scopes=true",
+            "https://accounts.google.com/o/oauth2/v2/auth?client_id={}&redirect_uri={}&response_type=code&scope=https://www.googleapis.com/auth/drive%20https://www.googleapis.com/auth/userinfo.email%20https://www.googleapis.com/auth/userinfo.profile&access_type=offline&prompt=select_account%20consent&include_granted_scopes=true",
             urlencoding::encode(&client_id),
             urlencoding::encode(&redirect_uri)
         );
 
-        let token_data_clone = Arc::clone(&self.token_data);
+        let accounts_store_clone = Arc::clone(&self.accounts_store);
         let config_dir_clone = self.config_dir.clone();
 
         // Launch system browser
@@ -289,24 +399,47 @@ impl AuthManager {
                                     }
                                 }
 
-                                let data = TokenData {
-                                    access_token: token_obj.access_token,
-                                    refresh_token: token_obj.refresh_token,
-                                    expires_at: now + token_obj.expires_in,
-                                    user_email,
-                                    user_name,
-                                    user_picture,
-                                };
+                                let email = user_email
+                                    .clone()
+                                    .unwrap_or_else(|| format!("account-{}@gmail.com", &token_obj.access_token[..8.min(token_obj.access_token.len())]));
+                                let account_id = email.clone();
 
-                                let file = config_dir_clone.join("tokens.json");
-                                let _ = fs::write(&file, serde_json::to_string_pretty(&data).unwrap_or_default());
-                                *token_data_clone.lock().await = Some(data);
+                                let mut store = accounts_store_clone.lock().await;
+                                if let Some(existing) = store.accounts.iter_mut().find(|a| a.id == account_id) {
+                                    existing.access_token = token_obj.access_token;
+                                    if let Some(ref r) = token_obj.refresh_token {
+                                        existing.refresh_token = Some(r.clone());
+                                    }
+                                    existing.expires_at = now + token_obj.expires_in;
+                                    existing.name = user_name.clone();
+                                    existing.picture = user_picture.clone();
+                                    existing.user_email = Some(email.clone());
+                                    existing.user_name = user_name.clone();
+                                    existing.user_picture = user_picture.clone();
+                                } else {
+                                    store.accounts.push(GoogleAccount {
+                                        id: account_id.clone(),
+                                        email: email.clone(),
+                                        name: user_name.clone(),
+                                        picture: user_picture.clone(),
+                                        access_token: token_obj.access_token,
+                                        refresh_token: token_obj.refresh_token,
+                                        expires_at: now + token_obj.expires_in,
+                                        user_email: Some(email.clone()),
+                                        user_name: user_name.clone(),
+                                        user_picture: user_picture.clone(),
+                                    });
+                                }
+                                store.active_account_id = Some(account_id);
+
+                                let file = config_dir_clone.join("accounts.json");
+                                let _ = fs::write(&file, serde_json::to_string_pretty(&*store).unwrap_or_default());
                                 success = true;
                             }
                         }
 
                         let html_response = if success {
-                            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!DOCTYPE html><html><head><meta charset='utf-8'><title>GGDown Login</title><style>body{background:#090d16;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}.card{background:#1e293b;padding:36px;border-radius:14px;text-align:center;box-shadow:0 10px 25px rgba(0,0,0,0.5);max-width:440px;}h1{color:#38bdf8;margin-bottom:12px;font-size:22px;}p{color:#94a3b8;font-size:14px;line-height:1.6;}</style></head><body><div class='card'><h1>Authentication Successful!</h1><p>Google Drive has been connected. You can now close this tab and return to the GGDown application.</p></div></body></html>"
+                            "HTTP/1.1 200 OK\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!DOCTYPE html><html><head><meta charset='utf-8'><title>GGDown Login</title><style>body{background:#090d16;color:#e2e8f0;font-family:sans-serif;display:flex;align-items:center;justify-content:center;height:100vh;margin:0;}.card{background:#1e293b;padding:36px;border-radius:14px;text-align:center;box-shadow:0 10px 25px rgba(0,0,0,0.5);max-width:440px;}h1{color:#38bdf8;margin-bottom:12px;font-size:22px;}p{color:#94a3b8;font-size:14px;line-height:1.6;}</style></head><body><div class='card'><h1>Account Connected!</h1><p>Google Account successfully connected to GGDown. You can close this tab and return to the application.</p></div></body></html>"
                         } else {
                             "HTTP/1.1 400 Bad Request\r\nContent-Type: text/html; charset=utf-8\r\n\r\n<!DOCTYPE html><html><body><h2>Authentication failed. Unable to connect to Google.</h2></body></html>"
                         };
@@ -321,4 +454,3 @@ impl AuthManager {
         Ok(auth_url)
     }
 }
-
