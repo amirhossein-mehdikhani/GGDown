@@ -1377,7 +1377,7 @@ export default function App() {
                     </div>
                   </li>
                   <li className="mt-1">Click <strong className="text-slate-200">Save and Continue</strong>.</li>
-                  <li className="mt-1"><strong className="text-amber-400">Test Users (Important):</strong> On the Test Users step, click <strong className="text-slate-200">+ Add Users</strong> and enter your Gmail address (and any other accounts you plan to connect). Click <strong className="text-slate-200">Save and Continue</strong>.</li>
+                  <li className="mt-1"><strong className="text-amber-400">Test Users (Audience Tab):</strong> In the <strong className="text-blue-300">"Audience"</strong> tab, scroll down to the <strong className="text-slate-200">"Test users"</strong> section, click <strong className="text-emerald-400">+ ADD USERS</strong> and enter your Gmail address(es), then click <strong className="text-slate-200">Save</strong>.</li>
                 </ul>
               </div>
 
