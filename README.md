@@ -42,27 +42,9 @@ sudo apt install -y pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev libssl-dev lib
 npm run tauri dev
 ```
 
-### Build Production Binary Locally (deb / AppImage / exe):
+### Build Production Binary (deb / AppImage / exe):
 ```bash
 npm run tauri build
 ```
 Production packages will be generated under `src-tauri/target/release/bundle/`.
 
----
-
-## 📦 Automated GitHub Releases (CI/CD)
-
-Whenever you are ready to publish a new release across **Windows**, **macOS**, and **Linux**, simply create and push a version tag:
-
-```bash
-git tag v0.1.0
-git push origin v0.1.0
-```
-
-GitHub Actions will automatically:
-1. Spin up Ubuntu, Windows, and macOS runners in parallel.
-2. Compile and package:
-   - **Windows:** `.exe` installer (NSIS) and `.msi` package
-   - **Linux:** `.deb` package and portable `.AppImage`
-   - **macOS:** `.dmg` installer (Apple Silicon & Intel)
-3. Create a GitHub Release in your repository and upload all downloadable installers!
