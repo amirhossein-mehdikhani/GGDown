@@ -53,7 +53,7 @@ jobs:
       - name: Install frontend dependencies
         run: npm install
 
-      - name: Build Tauri app & Publish to GitHub Release
+      - name: Build Tauri app & Upload to Draft Release
         uses: tauri-apps/tauri-action@v1
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
@@ -64,3 +64,39 @@ jobs:
           releaseDraft: true
           prerelease: false
           args: ${{ matrix.args }}
+
+  publish-and-cleanup:
+    needs: release
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          TAG="${{ github.ref_name }}"
+          if [[ "$TAG" != v* ]]; then
+            VERSION=$(jq -r '.version' src-tauri/tauri.conf.json)
+            TAG="v$VERSION"
+          fi
+          echo "Publishing release $TAG..."
+          gh release edit "$TAG" --draft=false || true
+
+      - name: Keep only latest 5 releases (delete older ones)
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          echo "Fetching published releases..."
+          gh release list --limit 100 --exclude-drafts --json tagName,createdAt --jq 'sort_by(.createdAt) | reverse | .[5:][].tagName' | while read -r old_tag; do
+            if [ -n "$old_tag" ]; then
+              echo "Pruning older release and tag: $old_tag"
+              gh release delete "$old_tag" --yes --cleanup-tag || true
+            fi
+          done
+          echo "Cleanup complete. At most 5 latest releases are retained."
