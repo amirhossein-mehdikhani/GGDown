@@ -31,7 +31,10 @@ import {
   Check,
   ChevronDown,
   UserPlus,
-  Users
+  Users,
+  BookOpen,
+  KeyRound,
+  CheckCircle2
 } from "lucide-react";
 
 interface DriveFile {
@@ -97,6 +100,7 @@ export default function App() {
   const [pendingAuthUrl, setPendingAuthUrl] = useState<string | null>(null);
   const [copied, setCopied] = useState(false);
   const [showAccountDropdown, setShowAccountDropdown] = useState(false);
+  const [showGuideModal, setShowGuideModal] = useState(false);
 
   // Drive state
   const [files, setFiles] = useState<DriveFile[]>([]);
@@ -734,13 +738,22 @@ export default function App() {
                 <p className="text-slate-400 max-w-lg text-sm mb-6 leading-relaxed">
                   Connect your Google account to explore your Drive files, create folders, upload files with auto-resume on network failure, and perform high-speed chunked downloads.
                 </p>
-                <button
-                  onClick={() => setShowSettings(true)}
-                  className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center gap-2 text-sm"
-                >
-                  <Settings className="w-4 h-4" />
-                  Configure & Connect Account
-                </button>
+                <div className="flex flex-wrap items-center justify-center gap-3">
+                  <button
+                    onClick={() => setShowSettings(true)}
+                    className="bg-blue-600 hover:bg-blue-500 text-white font-semibold px-6 py-2.5 rounded-xl shadow-lg shadow-blue-600/25 transition-all flex items-center gap-2 text-sm"
+                  >
+                    <Settings className="w-4 h-4" />
+                    Configure & Connect Account
+                  </button>
+                  <button
+                    onClick={() => setShowGuideModal(true)}
+                    className="bg-slate-900 hover:bg-slate-800 text-slate-300 font-medium px-5 py-2.5 rounded-xl border border-slate-800 hover:border-slate-700 transition-all flex items-center gap-2 text-sm"
+                  >
+                    <BookOpen className="w-4 h-4 text-blue-400" />
+                    How to get Client ID & Secret?
+                  </button>
+                </div>
               </div>
             ) : (
               <div className="flex-1 flex flex-col overflow-hidden">
@@ -1096,15 +1109,24 @@ export default function App() {
                 <Settings className="w-5 h-5 text-blue-400" />
                 Google Drive Connection Settings
               </h3>
-              <button
-                onClick={() => {
-                  setShowSettings(false);
-                  setPendingAuthUrl(null);
-                }}
-                className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded-lg hover:bg-slate-800 transition"
-              >
-                ✕
-              </button>
+              <div className="flex items-center gap-2">
+                <button
+                  onClick={() => setShowGuideModal(true)}
+                  className="flex items-center gap-1.5 text-xs text-blue-400 hover:text-blue-300 bg-blue-500/10 hover:bg-blue-500/20 border border-blue-500/20 px-3 py-1.5 rounded-xl transition font-medium"
+                >
+                  <BookOpen className="w-3.5 h-3.5" />
+                  Setup Guide
+                </button>
+                <button
+                  onClick={() => {
+                    setShowSettings(false);
+                    setPendingAuthUrl(null);
+                  }}
+                  className="text-slate-400 hover:text-slate-200 text-xs px-2 py-1 rounded-lg hover:bg-slate-800 transition"
+                >
+                  ✕
+                </button>
+              </div>
             </div>
 
             <p className="text-xs text-slate-400 mb-5 leading-relaxed">
@@ -1258,6 +1280,165 @@ export default function App() {
                   </div>
                 </div>
               )}
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ================= GOOGLE CLOUD OAUTH SETUP GUIDE MODAL ================= */}
+      {showGuideModal && (
+        <div className="fixed inset-0 bg-black/85 backdrop-blur-md flex items-center justify-center p-4 z-50">
+          <div className="bg-[#111827] border border-slate-800 w-full max-w-2xl max-h-[90vh] rounded-3xl p-6 sm:p-7 shadow-2xl flex flex-col overflow-hidden animate-in fade-in zoom-in-95 duration-150">
+            {/* Header */}
+            <div className="flex items-center justify-between pb-4 border-b border-slate-800 shrink-0">
+              <div className="flex items-center gap-2.5">
+                <div className="w-9 h-9 rounded-xl bg-blue-500/10 border border-blue-500/20 flex items-center justify-center text-blue-400">
+                  <KeyRound className="w-5 h-5" />
+                </div>
+                <div>
+                  <h3 className="text-base font-bold text-white flex items-center gap-2">
+                    Google OAuth 2.0 Credentials Guide
+                    <span className="text-[10px] bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 px-2 py-0.5 rounded-full font-semibold">
+                      Latest Console UI
+                    </span>
+                  </h3>
+                  <p className="text-xs text-slate-400">
+                    Follow these 5 steps to get your free Google Client ID & Secret
+                  </p>
+                </div>
+              </div>
+              <button
+                onClick={() => setShowGuideModal(false)}
+                className="text-slate-400 hover:text-slate-200 text-sm px-2.5 py-1.5 rounded-lg hover:bg-slate-800 transition"
+              >
+                ✕
+              </button>
+            </div>
+
+            {/* Direct Link to Console */}
+            <div className="pt-4 pb-2 shrink-0">
+              <button
+                onClick={() => invoke("open_browser_url", { url: "https://console.cloud.google.com/" })}
+                className="w-full py-2.5 bg-gradient-to-r from-blue-600/20 to-indigo-600/20 hover:from-blue-600/30 hover:to-indigo-600/30 border border-blue-500/30 rounded-xl text-xs text-blue-300 font-semibold flex items-center justify-center gap-2 transition shadow-sm"
+              >
+                <ExternalLink className="w-3.5 h-3.5" />
+                Open Google Cloud Console in Browser (console.cloud.google.com)
+              </button>
+            </div>
+
+            {/* Steps Scrollable Area */}
+            <div className="flex-1 overflow-y-auto pr-1 py-3 space-y-3.5 text-xs text-slate-300 leading-relaxed">
+              {/* Step 1 */}
+              <div className="bg-[#0b0f19] border border-slate-800/80 rounded-2xl p-4">
+                <div className="flex items-center gap-2.5 font-bold text-slate-100 text-sm mb-2">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black shrink-0">
+                    1
+                  </span>
+                  Create or Select a Project
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
+                  <li>Go to <span className="text-blue-400 font-mono">console.cloud.google.com</span>.</li>
+                  <li>Click the project dropdown at the top-left of the page.</li>
+                  <li>Click <strong className="text-slate-200">"New Project"</strong>, name it <code className="bg-slate-800 text-blue-300 px-1.5 py-0.5 rounded">GGDown</code>, and click <strong className="text-slate-200">Create</strong>.</li>
+                </ul>
+              </div>
+
+              {/* Step 2 */}
+              <div className="bg-[#0b0f19] border border-blue-900/40 rounded-2xl p-4 bg-blue-950/10">
+                <div className="flex items-center gap-2.5 font-bold text-slate-100 text-sm mb-2">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black shrink-0">
+                    2
+                  </span>
+                  Enable "Google Drive API" <span className="text-[11px] text-amber-400 font-semibold">(Crucial!)</span>
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
+                  <li>In the left sidebar, click <strong className="text-slate-200">APIs & Services &gt; Library</strong>.</li>
+                  <li>Search for <strong className="text-slate-200">"Google Drive API"</strong>.</li>
+                  <li>Click on it, then click the blue <strong className="text-emerald-400">Enable</strong> button.</li>
+                </ul>
+              </div>
+
+              {/* Step 3 */}
+              <div className="bg-[#0b0f19] border border-slate-800/80 rounded-2xl p-4">
+                <div className="flex items-center gap-2.5 font-bold text-slate-100 text-sm mb-2">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black shrink-0">
+                    3
+                  </span>
+                  Configure Google Auth Platform (Consent Screen)
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
+                  <li>In the left menu, click <strong className="text-slate-200">Google Auth Platform</strong> (or <strong className="text-slate-200">APIs & Services &gt; OAuth consent screen</strong>).</li>
+                  <li>Under <strong className="text-slate-200">User Type / Audience</strong>, select <strong className="text-blue-300">"External"</strong> and click <strong className="text-slate-200">Create</strong>.</li>
+                  <li>Fill in the required information:
+                    <div className="ml-5 mt-1 space-y-0.5 font-mono text-[11px] text-slate-300">
+                      <div>• App name: <span className="text-blue-400">GGDown</span></div>
+                      <div>• User support email: <span className="text-blue-400">(Your Gmail)</span></div>
+                      <div>• Developer contact email: <span className="text-blue-400">(Your Gmail)</span></div>
+                    </div>
+                  </li>
+                  <li className="mt-1">Click <strong className="text-slate-200">Save and Continue</strong>.</li>
+                  <li className="mt-1"><strong className="text-amber-400">Test Users (Important):</strong> On the Test Users step, click <strong className="text-slate-200">+ Add Users</strong> and enter your Gmail address (and any other accounts you plan to connect). Click <strong className="text-slate-200">Save and Continue</strong>.</li>
+                </ul>
+              </div>
+
+              {/* Step 4 */}
+              <div className="bg-[#0b0f19] border border-slate-800/80 rounded-2xl p-4">
+                <div className="flex items-center gap-2.5 font-bold text-slate-100 text-sm mb-2">
+                  <span className="w-6 h-6 rounded-full bg-blue-600 text-white flex items-center justify-center text-xs font-black shrink-0">
+                    4
+                  </span>
+                  Create OAuth Client ID (Select "Desktop app")
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
+                  <li>In the left menu, click <strong className="text-slate-200">Clients</strong> (or <strong className="text-slate-200">APIs & Services &gt; Credentials</strong>).</li>
+                  <li>Click <strong className="text-slate-200">+ Create Client</strong> (or <strong className="text-slate-200">+ Create Credentials &gt; OAuth client ID</strong>).</li>
+                  <li>Under <strong className="text-slate-200">Application type</strong>, select <strong className="text-emerald-400">Desktop app</strong>. <em>(Do not choose Web application)</em>.</li>
+                  <li>Name: <code className="bg-slate-800 text-blue-300 px-1.5 py-0.5 rounded">GGDown Desktop</code>.</li>
+                  <li>Click <strong className="text-slate-200">Create</strong>.</li>
+                </ul>
+              </div>
+
+              {/* Step 5 */}
+              <div className="bg-[#0b0f19] border border-emerald-900/40 rounded-2xl p-4 bg-emerald-950/10">
+                <div className="flex items-center gap-2.5 font-bold text-slate-100 text-sm mb-2">
+                  <span className="w-6 h-6 rounded-full bg-emerald-600 text-white flex items-center justify-center text-xs font-black shrink-0">
+                    5
+                  </span>
+                  Copy Credentials into GGDown
+                </div>
+                <ul className="list-disc list-inside space-y-1 text-slate-400 pl-1">
+                  <li>Copy your <strong className="text-slate-200">Client ID</strong> (ends with <code className="text-blue-400">...apps.googleusercontent.com</code>).</li>
+                  <li>Copy your <strong className="text-slate-200">Client Secret</strong> (starts with <code className="text-blue-400">GOCSPX-...</code>).</li>
+                  <li>Paste them into GGDown Settings, click <strong className="text-slate-200">Save Credentials</strong>, and click <strong className="text-slate-200">Sign In with Google</strong>!</li>
+                </ul>
+              </div>
+
+              {/* Helpful Tips Box */}
+              <div className="p-3.5 bg-blue-950/40 border border-blue-800/50 rounded-2xl text-[11px] text-blue-200 space-y-1.5">
+                <div className="font-bold flex items-center gap-1.5 text-blue-300">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-emerald-400" />
+                  Important Tips during Login:
+                </div>
+                <p>
+                  • When the browser opens Google's authorization page, <strong>be sure to check the checkbox</strong> giving permission to access your Google Drive files.
+                </p>
+                <p>
+                  • Because your app is in "Testing" mode, only the accounts listed in <strong>Test Users (Step 3)</strong> can log in. You can add more Google accounts to Test Users in Google Console anytime!
+                </p>
+              </div>
+            </div>
+
+            {/* Footer */}
+            <div className="pt-4 border-t border-slate-800 flex justify-end shrink-0">
+              <button
+                onClick={() => {
+                  setShowGuideModal(false);
+                  setShowSettings(true);
+                }}
+                className="bg-blue-600 hover:bg-blue-500 text-white text-xs font-semibold px-5 py-2.5 rounded-xl shadow-md shadow-blue-600/25 transition"
+              >
+                Got It! Enter Credentials
+              </button>
             </div>
           </div>
         </div>
