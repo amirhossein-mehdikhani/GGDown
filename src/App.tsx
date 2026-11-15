@@ -313,7 +313,7 @@ export default function App() {
 
   const handleAddAccount = () => {
     setShowAccountDropdown(false);
-    handleStartLogin();
+    setShowSettings(true);
   };
 
   const handleManualOpenBrowser = async () => {
